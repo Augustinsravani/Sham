@@ -1,0 +1,442 @@
+set notruncation;
+let DataTimespan=93d;
+let UTCtoPST=(UTCdate:datetime)
+{
+    UTCdate+5h+30m     //case( UTCdate between (datetime(2016-03-13 10:00:00.0000000)..datetime(2016-11-06 10:00:00.0000000)) or UTCdate between (datetime(2017-03-12 10:00:00.0000000)..datetime(2017-11-05 10:00:00.0000000)) or UTCdate between (datetime(2018-03-11 10:00:00.0000000)..datetime(2018-11-04 10:00:00.0000000)) or UTCdate between (datetime(2019-03-10 10:00:00.0000000)..datetime(2019-11-03 10:00:00.0000000)), 7h,8h)
+};
+let MonthName=(MonthNo:int){
+         iif(MonthNo==1,"Jan",iif(MonthNo==2,"Feb",iif(MonthNo==3,"Mar",iif(MonthNo==4,"Apr",iif(MonthNo==5,"May",iif(MonthNo==6,"Jun",iif(MonthNo==7,"Jul",iif(MonthNo==8,"Aug",iif(MonthNo==9,"Sep",iif(MonthNo==10,"Oct",iif(MonthNo==11,"Nov","Dec")))))))))))
+};
+let DayDiffMin=(StartDateParam:datetime,EndDateParam:datetime)
+{
+    let t1Param = "00:00";
+    let t2Param = "06:30";
+    let t3Param = "14:00";
+    let t4Param = "22:30";
+    let t5param="23:59:9999";
+    let StartDate = todatetime(StartDateParam);
+    let EndDate = todatetime(EndDateParam);
+    let stdate_datepart = substring(tostring(StartDate), 0, 10);
+    let Span1Start = todatetime(stdate_datepart)+totimespan(t1Param);
+    let Span1End = todatetime(stdate_datepart)+totimespan(t2Param);
+    let Span2Start = todatetime(stdate_datepart)+totimespan(t2Param);
+    let Span2End = todatetime(stdate_datepart)+totimespan(t3Param);
+    let Span3Start = todatetime(stdate_datepart)+totimespan(t3Param);
+    let Span3End = todatetime(stdate_datepart)+totimespan(t4Param);
+    let Span4Start = todatetime(stdate_datepart)+totimespan(t4Param);
+    let Span4End = todatetime(stdate_datepart)+totimespan(t5param);
+    let DiffMin=case((StartDate >= Span2Start and EndDate <= Span2End) or (StartDate >= Span3Start and EndDate <= Span3End),
+    (EndDate-StartDate)/1m ,//normal dif
+    (StartDate >= Span1Start and StartDate < Span1End and EndDate >=Span2Start and EndDate <Span4Start),
+    (EndDate-Span2Start)/1m//rest hour 1st shift diff starttime
+    ,(StartDate >=Span4Start and StartDate <=Span4End and EndDate >=Span2Start and EndDate <Span4Start)
+    ,(EndDate-Span2Start)/1m,//rest hour last shift diff starttime
+    StartDate>=Span2Start and StartDate <=Span3End and EndDate >Span4Start,
+    (Span3End-StartDate)/1m,
+    //(Span3End-StartDate)/1m ,// if starttime is in limit but end time is not in limit 
+    toreal(0));
+    DiffMin;
+};
+let GetBusinessMinutes=(StartDateParam: datetime,EndDateParam:datetime)
+{
+    let StartDate = todatetime(StartDateParam);
+    let EndDate = todatetime(EndDateParam);
+    let FirstDayEndDate = endofday(StartDate);
+    let LastDayStartDate = substring(tostring(EndDate), 0, 10);
+    let stdate = substring(tostring(StartDate), 0, 10);
+    let stdateWithSOD = startofday(todatetime(stdate));
+    let enddate_datepart = substring(tostring(EndDate), 0, 10);
+    let enddateWithSOD = startofday(todatetime(enddate_datepart));
+    let DayDiff = toint((enddateWithSOD - stdateWithSOD)/1d);
+    let SecondStDateWithSOD = stdateWithSOD + 1d;
+    let LastStDateWithSOD = enddateWithSOD -1d;
+    let WorkDayDiff=iif(DayDiff>=2, iif(SecondStDateWithSOD <= LastStDateWithSOD,(LastStDateWithSOD-SecondStDateWithSOD)/1d+1,0.0),0.0);
+    let Start = dayofweek(SecondStDateWithSOD)/1d;
+    let Quo = toint(WorkDayDiff/7);
+    let Rem = WorkDayDiff%7;
+    let DList = case(Start==0,case(Rem==1,"0",Rem==2,"01",Rem==3,"012",Rem==4,"0123",Rem==5,"01234",Rem==6,"012345","-") ,Start==1,case(Rem==1,"1",Rem==2,"12",Rem==3,"123",Rem==4,"1234",Rem==5,"12345",Rem==6,"123456","-") ,Start==2,case(Rem==1,"2",Rem==2,"23",Rem==3,"234",Rem==4,"2345",Rem==5,"23456",Rem==6,"234560","-") ,Start==3,case(Rem==1,"3",Rem==2,"34",Rem==3,"345",Rem==4,"3456",Rem==5,"34560",Rem==6,"345601","-") ,Start==4,case(Rem==1,"4",Rem==2,"45",Rem==3,"456",Rem==4,"4560",Rem==5,"45601",Rem==6,"456012","-") ,Start==5,case(Rem==1,"5",Rem==2,"56",Rem==3,"560",Rem==4,"5601",Rem==5,"56012",Rem==6,"560123","-") ,Start==6,case(Rem==1,"6",Rem==2,"60",Rem==3,"601",Rem==4,"6012",Rem==5,"60123",Rem==6,"601234","-") ,"-");
+    let SunAdd = iif(DList contains "0",1,0);
+    let MonAdd = iif(DList contains "1",1,0);
+    let TueAdd = iif(DList contains "2",1,0);
+    let WedAdd = iif(DList contains "3",1,0);
+    let ThuAdd = iif(DList contains "4",1,0);
+    let FriAdd = iif(DList contains "5",1,0);
+    let SatAdd = iff(DList contains "6",1,0);
+    let NoOfWorkdays=(7 * Quo) + MonAdd + TueAdd + WedAdd + ThuAdd + FriAdd + SatAdd +SunAdd;
+    let FirstDayDiffMin =iif(DayDiff==0,DayDiffMin(StartDate,EndDate),DayDiffMin(StartDate,FirstDayEndDate));
+    let MiddleDiffMin = NoOfWorkdays * 960;
+    let LastDayDiffMin = iif(DayDiff == 0,toreal(0),DayDiffMin(todatetime(LastDayStartDate),EndDate));
+    let DiffMinTotal = case(DayDiff == 0,FirstDayDiffMin,DayDiff == 1,FirstDayDiffMin+LastDayDiffMin,FirstDayDiffMin+ MiddleDiffMin+ LastDayDiffMin);
+    round(DiffMinTotal,0);
+};
+let TempXBOTSLA=()
+{
+    datatable(Severity:int,Name:string,SlaEffFrom:datetime,SlaEffTo:datetime,TTD:int,TTA:int,TTM:int) [0,"Sev - 0",datetime(2013-01-01 00:00:00),datetime(9999-01-01 23:59:59),5,10,15, 1,"Sev - 1",datetime(2013-01-01 00:00:00),datetime(9999-01-01 23:59:59),5,10,15, 2,"Sev - 2",datetime(2013-01-01 00:00:00),datetime(9999-01-01 23:59:59),5,10,60, 3,"Sev - 3",datetime(2013-01-01 00:00:00),datetime(2017-11-30 23:59:59),5,60,240, 3,"Sev - 3",datetime(2017-12-01 00:00:00),datetime(9999-01-01 23:59:59),5,60,180, 4,"Sev - 4",datetime(2013-01-01 00:00:00),datetime(9999-01-01 23:59:59),5,120,1440]
+};
+let XBOTSLA = materialize(TempXBOTSLA);
+let TempXBotIncidents=()
+{
+    IncidentHistory
+    | where ChangeDate >= ago(DataTimespan)
+    | where OwningTeamName in ("XSTORE\\XBOT","XSTOREBLACKFOREST\\XBOT")
+    | distinct IncidentId
+    | join kind = inner
+    (
+        IncidentsSnapshotV2
+        | where CreateDate >= ago(DataTimespan) and IncidentType in ("Deployment") and SiloId in (1,3,5,8)
+    )
+    on IncidentId
+    | project IncidentId,CreateDate,Status,ResolvedBy,OwningContactAlias,IncidentType,OccurringServiceInstanceId,OccurringDeviceName,OccurringDeviceGroup,Severity,Title,CloudType = "Public",IncidentSubType,CreateDate_UTC = CreateDate,TsgId,HowFixed,IsCustomerImpacting,OwningTeamName,OwningTenantName,CreateDate_PST=UTCtoPST(CreateDate),OccurringEnvironment,Keywords,ImpactStartDate_UTC = ImpactStartDate,IsNoise,MitigatedBy,Mitigation,RootCauseId,SiloId,ComponentImpacted = iif(isempty(Component),"Impacted Component not Assigned",Component),CurrentDate_PST = UTCtoPST(now())
+    | extend Created_Ist= CreateDate + 5h + 30m
+};
+let XBotIncidents = materialize(TempXBotIncidents);
+let TempAssignedDateUTC = ()
+{
+    XBotIncidents
+    | join kind = inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+        | where OwningTeamName in ("XSTORE\\XBOT","XSTOREBLACKFOREST\\XBOT")
+        | summarize AssignedDate_UTC = min(ChangeDate) by IncidentId
+    )
+    on IncidentId
+    | project IncidentId, AssignedDate_UTC
+    | extend AssignedDate_PST = UTCtoPST(AssignedDate_UTC)
+};
+let AssignedDateUTC = materialize(TempAssignedDateUTC);
+let TempFirstMitigateDateUTC = ()
+{
+    AssignedDateUTC
+    | join kind = inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+        | where Status in ("MITIGATED","RESOLVED")
+    )
+    on IncidentId
+    | summarize FirstMitigateDate_UTC = min(ChangeDate) by IncidentId
+    | project IncidentId, FirstMitigateDate_UTC , FirstMitigateDate_PST = UTCtoPST(FirstMitigateDate_UTC)
+};
+let FirstMitigateDateUTC = materialize(TempFirstMitigateDateUTC);
+let TempMitigateDateUTC = ()
+{
+    AssignedDateUTC
+    | join kind = inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+        | where Status in ("MITIGATED","RESOLVED")
+    )
+    on IncidentId
+    | where ChangeDate >= AssignedDate_UTC
+    | summarize MitigateDate_UTC = min(ChangeDate) by IncidentId
+    | project IncidentId, MitigateDate_UTC , MitigateDate_PST = UTCtoPST(MitigateDate_UTC)
+};
+let MitigateDateUTC = materialize(TempMitigateDateUTC);
+let TempResolveDateUTC = ()
+{
+    AssignedDateUTC
+    | join kind = inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+    )
+    on IncidentId
+    | where Status == "RESOLVED" and ChangeDate >= AssignedDate_UTC
+    | summarize ResolveDate_UTC = min(ChangeDate) by IncidentId
+    | project IncidentId, ResolveDate_UTC , ResolveDate_PST = UTCtoPST(ResolveDate_UTC)
+};
+let ResolveDateUTC = materialize(TempResolveDateUTC);
+let TempAutoResolve = ()
+{
+    XBotIncidents
+    | join kind = inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+        | where ChangedBy == "xdashdev" and Status == "RESOLVED"
+    )
+    on IncidentId
+    | project IncidentId,AutoResolved = 1
+};
+let AutoResolve = materialize(TempAutoResolve);
+let TempDuplicate = ()
+{
+    XBotIncidents
+    | join kind = inner
+    (
+        IncidentRelationships
+        | project IncidentId = ChildIncidentId , IsTombstoned , RelationshipType , Lens_IngestionTime
+        | summarize arg_max(Lens_IngestionTime, *) by IncidentId
+        | where RelationshipType == "DUPLICATE" and (IsTombstoned == 0 or isnull(IsTombstoned))
+    )
+    on IncidentId
+    | project IncidentId,DuplicateIncident = 1
+};
+let Duplicate = materialize(TempDuplicate);
+let TempAcknowledgeDateUTC = ()
+{
+    AssignedDateUTC
+    | join kind = inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan) and isnotempty(OwningContactAlias)
+    )
+    on IncidentId
+    | where ChangeDate >= AssignedDate_UTC
+    | join kind = leftouter
+    (
+        MitigateDateUTC
+        | project IncidentId , MitigateDate_UTC
+    )
+    on IncidentId
+    | where ChangeDate <= iif(isnotempty(tostring(MitigateDate_UTC)),MitigateDate_UTC,now())
+    | summarize AcknowledgeDate_UTC = min(ChangeDate) by IncidentId
+    | project IncidentId, AcknowledgeDate_UTC , AcknowledgeDate_PST = UTCtoPST(AcknowledgeDate_UTC)
+};
+let AcknowledgeDateUTC = materialize(TempAcknowledgeDateUTC);
+let TempEscalatedDateUTC = ()
+{
+    AssignedDateUTC
+    | join kind = inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+        | where ((OwningTeamName != "XSTORE\\XBOT") and (OwningTeamName != "XSTOREBLACKFOREST\\XBOT")and isnotempty(OwningTenantName))
+    )
+    on IncidentId
+    | where ChangeDate >= AssignedDate_UTC
+    | summarize EscalatedDate_UTC = min(ChangeDate) by IncidentId
+    | project IncidentId, EscalatedDate_UTC , EscalatedDate_PST = UTCtoPST(EscalatedDate_UTC)
+};
+let EscalatedDateUTC = materialize(TempEscalatedDateUTC);
+let TempXTESTIncsFinal=()
+{
+    XBotIncidents
+    | join kind=leftouter
+    (
+        AssignedDateUTC
+    )
+    on IncidentId
+    | join kind=leftouter
+    (
+        AcknowledgeDateUTC
+    )
+    on IncidentId
+    | join kind=leftouter
+    (
+        FirstMitigateDateUTC
+    )
+    on IncidentId
+    | join kind=leftouter
+    (
+        MitigateDateUTC
+    )
+    on IncidentId
+    | join kind=leftouter
+    (
+        Duplicate
+    )
+    on IncidentId
+    | join kind=leftouter
+    (
+        AutoResolve
+    )
+    on IncidentId
+    | join kind=leftouter
+    (
+        EscalatedDateUTC
+    )
+    on IncidentId
+    | join kind=leftouter ( ResolveDateUTC ) on IncidentId
+};
+let XTESTIncsFinal = materialize(TempXTESTIncsFinal);
+let TempRevision=()
+{
+    XTESTIncsFinal
+    | join kind=inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+    )
+    on IncidentId
+    | join kind=inner
+    (
+        IncidentCustomFieldHistory
+        | where Lens_IngestionTime >= ago(DataTimespan)
+        | where DisplayName == "Sub Status"
+    )
+    on $left.HistoryId == $right.IncidentHistoryId
+    | sort by IncidentId,HistoryId desc
+    | serialize IncidentId,Rev=row_number()
+    | project IncidentId,HistoryId,ChangedBy,MitigateDate_UTC,ChangeDate_UTC=ChangeDate,Rev,DisplayName,Value,ChangeDate_PST = UTCtoPST(ChangeDate)
+};
+let Revision=materialize(TempRevision);
+let TempBizBlockedMins=()
+{
+    Revision
+    | join kind=leftouter
+    (
+        Revision
+        | extend PreRev=Rev+1
+    )
+    on $left.Rev==$right.PreRev and $left.IncidentId==$right.IncidentId
+    | project IncidentId,HistoryId,ChangedBy,ChangeDate_UTC,MitigateDate_UTC,ChangeDate=UTCtoPST(ChangeDate_UTC),Rev,DisplayName,Value, BizBlockedMin=GetBusinessMinutes(ChangeDate_PST,iif(isempty(ChangeDate_PST1),UTCtoPST(now()),ChangeDate_PST1))
+    | where Value=="Blocked" and ChangeDate_UTC <= iif(isempty(MitigateDate_UTC),now(),MitigateDate_UTC)
+    | summarize BizBlockedMin=sum(BizBlockedMin) by IncidentId
+};
+let BizBlockedMins=materialize(TempBizBlockedMins);
+let TempRev=()
+{
+    XTESTIncsFinal
+    | join kind=inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+    )
+    on IncidentId
+    | join kind=inner
+    (
+        IncidentCustomFieldHistory
+        | where Lens_IngestionTime >= ago(DataTimespan)
+        | where DisplayName == "Sub Status"
+    )
+    on $left.HistoryId == $right.IncidentHistoryId
+    | sort by IncidentId,HistoryId desc
+    | serialize IncidentId,Rev=row_number()
+    | project IncidentId,HistoryId,ChangedBy,EscalatedDate_UTC,ChangeDate_UTC=ChangeDate,Rev,DisplayName,Value
+};
+let Rev=materialize(TempRev);
+let TempBlockedMinsBeforeEsc=()
+{
+    Rev
+    | join kind=leftouter
+    (
+        Rev
+        | extend PreRev=Rev+1
+    )
+    on $left.Rev==$right.PreRev and $left.IncidentId==$right.IncidentId
+    | project IncidentId,HistoryId,ChangedBy,ChangeDate_UTC,EscalatedDate_UTC,ChangeDate=UTCtoPST(ChangeDate_UTC),Rev,DisplayName,Value,BlockedMinBeforeEsc=round((iif(isempty(ChangeDate_UTC1),iif(isempty(EscalatedDate_UTC),now(),EscalatedDate_UTC),ChangeDate_UTC1) - ChangeDate_UTC)/1m)
+    | where Value=="Blocked" and ChangeDate_UTC <= EscalatedDate_UTC
+    | summarize BlockedMinBeforeEsc=sum(BlockedMinBeforeEsc) by IncidentId
+};
+let BlockedMinsBeforeEsc=materialize(TempBlockedMinsBeforeEsc);
+let TempEscRevision=()
+{
+    XTESTIncsFinal
+    | join kind=inner
+    (
+        IncidentHistory
+        | where ChangeDate >= ago(DataTimespan)
+        | where isnotempty(OwningTeamName)
+    )
+    on IncidentId
+    | sort by IncidentId,HistoryId desc
+    | serialize IncidentId,Rev=row_number()
+    | project IncidentId,HistoryId,ChangedBy,MitigateDate_UTC,MitigateDate_PST,ChangeDate_UTC=ChangeDate,Rev,OwningTeamName=OwningTeamName1,ChangeDate_PST = UTCtoPST(ChangeDate),AssignedDate_UTC,AcknowledgeDate_UTC,AcknowledgeDate_PST,AssignedDate_PST = UTCtoPST(AssignedDate_UTC)
+};
+let EscRevision=materialize(TempEscRevision);
+let TempBizEscalatedMins=()
+{
+    EscRevision
+    | join kind=leftouter
+    (
+        EscRevision
+        | extend PreRev=Rev+1
+    )
+    on $left.Rev==$right.PreRev and $left.IncidentId==$right.IncidentId
+    | extend BizEscalatedMin=GetBusinessMinutes(ChangeDate_PST,iif(isempty(ChangeDate_PST1),iif(isempty(MitigateDate_PST),now(),MitigateDate_PST),ChangeDate_PST1))
+    | project IncidentId,HistoryId,ChangedBy,ChangeDate_UTC,MitigateDate_UTC,AssignedDate_PST,ChangeDate=UTCtoPST(ChangeDate_UTC),Rev,OwningTeamName,AcknowledgeDate_UTC,AssignedDate_UTC,ChangeDate_PST,MitigateDate_PST,ChangeDate_PST1, BizEscalatedMin
+    | where OwningTeamName !in ("XSTORE\\XBOT","XSTOREBLACKFOREST\\XBOT") and ChangeDate_PST >= AssignedDate_PST and ChangeDate_PST <= iif(isempty(MitigateDate_PST),UTCtoPST(now()),MitigateDate_PST)
+    | summarize BizEscalatedMin=sum(BizEscalatedMin) by IncidentId
+};
+let BizEscalatedMins=materialize(TempBizEscalatedMins);
+let TempXTESTIncsFinalReport=()
+{
+    XTESTIncsFinal
+    | join kind=leftouter
+    (
+        BizBlockedMins
+    )
+    on IncidentId
+    | join kind=leftouter
+    (
+        BlockedMinsBeforeEsc
+    )
+    on IncidentId
+    | join kind=leftouter
+    (
+        BizEscalatedMins
+    )
+    on IncidentId
+    | join kind= inner
+    (
+        XBOTSLA
+    )
+    on Severity
+    | extend TTAMins = round(GetBusinessMinutes(AssignedDate_PST,coalesce(AcknowledgeDate_PST,MitigateDate_PST,now())),0) ,TTEMins = round(iif(isempty(EscalatedDate_PST),toreal(0),GetBusinessMinutes(AssignedDate_PST,EscalatedDate_PST)-iif(isnotempty(BlockedMinBeforeEsc),BlockedMinBeforeEsc,toreal(0))),0) ,TTMMins = round(GetBusinessMinutes(AssignedDate_PST,coalesce(MitigateDate_PST,now()))-iif(isnotempty(BizBlockedMin),BizBlockedMin,toreal(0))-iif(isnotempty(BizEscalatedMin),BizEscalatedMin,toreal(0)),0) ,TTDMin = round((ImpactStartDate_UTC-CreateDate_UTC)/1m,0)
+    | extend TTASLA = iif(AutoResolved==1,1,iif(TTAMins <=TTA,1,0)),TTMSLA = iif(TTMMins <=TTM,1,0)
+    | project Created_Ist,TTA,CloudType,TTM,IncidentId,IncidentType,Severity,Title,Status,DuplicateIncident,AutoResolved,IncidentSubType,HowFixed,TsgId,IsCustomerImpacting,IsNoise,Keywords,OwningTenantName,OwningTeamName,OccurringEnvironment,OccurringServiceInstanceId,ComponentImpacted,RootCauseId,ImpactStartDate_UTC,CreateDate_UTC,AssignedDate_UTC,AcknowledgeDate_UTC,FirstMitigateDate_UTC,MitigateDate_UTC,ResolveDate_UTC,CreateDate_PST,CurrentDate_PST,AssignedDate_PST,AcknowledgeDate_PST=iff(isnull( AcknowledgeDate_PST),MitigateDate_PST,AcknowledgeDate_PST),FirstMitigateDate_PST,MitigateDate_PST,BizBlockedMin,BlockedMinBeforeEsc,BizEscalatedMin,TTAMins,TTEMins,TTMMins,EscalatedDate_UTC,EscalatedDate_PST,ResolveDate_PST,TTDMin,TTASLA,TTMSLA,Name,AssignedAfterMitigation=iif(AssignedDate_UTC>FirstMitigateDate_UTC,1,0)
+    | extend Category = case(Title contains "STG_AutoTest","STG_AutoTest",Title contains "Blocked for Tenant","Blocked for Tenant","Others")
+    | extend Age = iif(Status == "ACTIVE",round((now() - CreateDate_UTC)/1d,0),iff(Status == "MITIGATED",round((MitigateDate_PST - CreateDate_PST )/1d,0),round((ResolveDate_PST - CreateDate_PST)/1d,0)))
+    | extend TenantCategory = case(Title contains "Stev" or Title contains "Stx","PF","Physical" )
+};
+let XTESTIncsFinalRep = materialize(TempXTESTIncsFinalReport);
+let XTESTIncsFinalReport=(){
+XTESTIncsFinalRep
+| summarize arg_max(IncidentId,*) by IncidentId
+};
+let XTESTWeekly=()
+{
+    XTESTIncsFinalReport
+    | where CreateDate_UTC >= ago(42d)
+    | extend Aggregation="Weekly"
+    | extend Period = strcat(MonthName(datetime_part("Month",startofweek(CreateDate_PST-1d)+1d))," ",datetime_part("Day",startofweek(CreateDate_PST-1d)+1d)," - ",MonthName(datetime_part("Month",endofweek(CreateDate_PST-1d)+1d))," ",datetime_part("Day",endofweek(CreateDate_PST-1d)+1d))
+    | extend StartDate=startofweek(CreateDate_PST-1d)+1d
+    | extend EndDate=endofweek(CreateDate_PST-1d)+1d
+};
+let XTESTMonthly=()
+{
+    XTESTIncsFinalReport
+    | extend Aggregation="Monthly"
+    | extend Period=strcat(MonthName(substring(CreateDate_PST,5,2)),"-",tostring(substring(CreateDate_PST,0,4)))
+    | extend StartDate=startofmonth(CreateDate_PST)
+    | extend EndDate=endofmonth(CreateDate_PST)
+};
+let XBOT_Severtiy_change_check=()
+{
+    let Severity=(){  
+XTESTWeekly| union XTESTMonthly
+    |join kind=inner
+        IncidentHistory
+    on IncidentId
+    |where ChangeDescription contains "Incident acknowledged"
+    |summarize ChangeDate_desc=arg_max(ChangeDate,*) by IncidentId
+    |
+project IncidentId,ChangeDate_desc,ChangeDescription
+};
+let Description=()
+{
+    XTESTWeekly
+| union XTESTMonthly
+    |join kind=inner
+        IncidentHistory
+    on IncidentId
+    |where  ChangeCategories contains "SeverityUpgrade"
+    |extend changeDate_sev=ChangeDate
+    |summarize ChangeDate_sev=arg_max(ChangeDate,*) by IncidentId
+    |project IncidentId,changeDate_sev,ChangeCategories
+};
+Description
+|join kind=inner
+    Severity
+on IncidentId
+| project IncidentId,ChangeDate_desc,changeDate_sev
+};
+XTESTWeekly
+| union XTESTMonthly
+|join kind=leftouter
+    XBOT_Severtiy_change_check
+on IncidentId
+| extend TTASLA = iff(Severity ==2 and TTASLA ==0,iff((datetime_diff('minute',ChangeDate_desc,changeDate_sev)>TTA),0,1),TTASLA)
